@@ -5,7 +5,7 @@ date: "2/1/2021"
 output: pdf_document
 ---
 
-Population is 10000 units following Beta distribution.
+Population is 10,000 units following Beta distribution.
 
 ```{r}
 population <- rbeta (10000, 1, 2)
@@ -19,20 +19,71 @@ var(population)
 
 Create samples from the population with size 1000
 
+Still about $X$, original random variable.
+
+We calculated $\bar{X}$ and $\hat{V}(X)$
+Compare these estimates with population quantities. What do you find?
 
 ```{r}
 sample = sample(population, size = 1000)
 plot (density (sample))
-# sample mean
-mean(sample)
-# sample variance of the sample mean
-var(population) / length(sample)
+# sample mean as estimator of population mean
+est.mean = mean(sample)
+
+# unbiased estimator of population variance
+est.var = 1000/(1000-1) * var(sample)
+
+```
+
+Normally-approximated confidence intervals
+
+First we need to estimate standard error of the sample mean
+
+We know it is
+
+$\hat{V}(\bar{X}) = \frac{\hat{V}(X)}{n}$. We have calculatd $\hat{V}(X)$ in the previous code chunk.
+
+```{r}
+sample_mean = mean(sample)
+
+#standard error of the sample mean
+ss = sqrt(est.var/1000)
+
+print ("point estimate of mean")
+print (sample_mean)
+print ("95% normal-approximated confidence interval of mean")
+c(sample_mean - 1.96 * ss, sample_mean + 1.96 * ss)
+
+```
+
+## bootstrap confidence interval for sample mean
+
+Bootstrap is slower, but needs no Central Limit Theorem.
+```{r}
+
+
+bootstrap_means = c() # store bootstrapped medians
+for (i in 1:10000){
+  # resample from the sample with replacement
+  boot_data <- sample(sample, 1000, replace = T)
+  boot_mean <- mean(boot_data)
+  bootstrap_means <- c(bootstrap_means, boot_mean)
+}
+
+# then simple quantile function to 
+print ("point estimate of mean")
+print (sample_mean)
+print ("95% bootstrap confidence interval of mean")
+conf = quantile(bootstrap_means, c(0.025, 0.975))
+print (conf)
+plot(density(bootstrap_means), main = "confidence interval")
+abline(v = conf[1], col = "red")
+abline(v = conf[2], col = "red")
 
 ```
 
 
-
-#$ Law of Large Numbers
+# Law of Large Numbers
 
 As $n$ increases, sample mean approaches population mean.
 
@@ -78,14 +129,18 @@ for (n in sample_times ){
 # bootstrap 
 
 For instance, we care about the *median* of population. Sample median is clearly an estimate of population median. But how can we obtain the *95% confidence interval* of estimated median?
+
 ```{r}
 sample = sample(population, size = 1000)
+```
+
+```{r}
 
 sample_median = median(sample)
 
 
 bootstrap_medians = c() # store bootstrapped medians
-for (i in 1:1000){
+for (i in 1:10000){
   # resample from the sample with replacement
   boot_data <- sample(sample, 1000, replace = T)
   boot_median <- median(boot_data)

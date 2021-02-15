@@ -1,0 +1,156 @@
+---
+title: "SOSC 5340 Lecture 3"
+output: pdf_document
+---
+
+
+# Linear regression vs Loess smoothing
+
+The data is taken from James et al., An Introduction to Statistical Learning: with Applications in R
+
+THe dataset is a random sample of 3000 males from the Atlantic region of the USA, with their basic demographic information and wages.
+
+
+```{r}
+# load some required packages
+library(ggplot2)
+library(margins)
+library(ISLR)
+library(broom)
+library(lmtest)
+data(Wage)
+```
+
+# MLE by hand
+```{r}
+data =read.csv("MichelinNY.csv")
+l = glm(InMichelin ~ Service + Decor + Food + Price, data, family=binomial("logit"))
+d1 <- tidy(coeftest(l))
+d1$group <- "R default"
+```
+
+## MLE byu hand
+
+We can use MLE to implement logistic regression estimations by hand
+```{r}
+
+logit = function(mX, vBeta) {
+  return(exp(mX %*% vBeta)/(1+ exp(mX %*% vBeta)) )
+}
+
+# log-likelihoood function
+
+logLikelihoodLogit = function(vBeta, mX, vY, a0 = 0, a1 = 0) {
+  return(-sum(
+    vY * log(  logit(mX, vBeta) ) + 
+      (1-vY)* log(1 - logit(mX, vBeta))
+  )
+  )
+}
+
+
+```
+
+Then use optim package to find $\beta$ that maximize log likelihood (or minimize negative log likelihood)
+```{r}
+vY = as.matrix(data['InMichelin'])
+mX = as.matrix(data.frame(`(Intercept)` = 1, data[c('Service','Decor', 'Food', 'Price')]))
+
+vBeta0 = rep(0, ncol(mX))
+  
+
+# optimize
+# report every 1 minute
+optimLogit <- optim(par = vBeta0, 
+                    fn = logLikelihoodLogit,
+                   mX = mX, vY = vY,
+                   method = "BFGS",
+                   hessian=TRUE, 
+                   control = list(maxit = 50000, trace = 2, REPORT = 1))
+# construct output
+coef = optimLogit$par  # coefficient
+coef.sd = sqrt(diag(solve(optimLogit$hessian))) # standard error
+tv  <- coef  / coef.sd # t-value
+pv <- 2 * pt(tv, df = nrow(mX) - ncol(mX), lower.tail = F) # p-value
+d = data.frame(term = d1$term, "estimate" = coef,  "std.error" = coef.sd, "statistic" = tv,  "p.value" = pv, check.names = FALSE)
+
+
+```
+
+
+
+compare the two estimates (default R and MLE by hand)
+```{r}
+
+d$group <- "MLE_by_hand"
+
+print (d1)
+print (d)
+  # geom_errorbar(aes(ymin = ))
+```
+
+# marginal effects and predicted probabilities
+We are going to see whether health status is related to wage, education, and race
+
+```{r}
+l = glm(health ~ wage + education + race, data = Wage, family=binomial("logit"))
+summary(l)
+```
+
+
+
+
+
+
+
+## interpretation 3 (marginal effect)
+
+```{r}
+AME <- margins(l)
+AME
+MEM <- margins(l, at = list(wage = mean(Wage$wage)))
+MEM
+
+```
+
+## Approach 4: plot predicted probability
+
+`cplot` is from `margins` package. By default, holding all other to be the constant and vary by focal variable
+
+
+```{r}
+cplot(l, "wage", what = "prediction", main = "Predicted probability")
+
+```
+
+```{r}
+## by default, holding all other to be the constant and vary by focal variable
+cplot(l, "race", what = "prediction", main = "Predicted probability")
+
+```
+
+
+`sjPlot` is another package that allows you to plot predicted probabilities more easily.
+Compared with `margins`, it is easier to plot the predicted probability while not holding others at the constant, which could be meaningless for categorical variables (e.g., race and education) 
+
+
+```{r}
+# use sjPlot
+library(sjPlot)
+plot_model(l, type = "pred", terms = c("wage", "education"), ci.lvl = NA )
+
+```
+
+## visualize interaction effects
+
+The marginal effect of wage on health vary by education; for less education population, wage's effect on health is particularily large; it is not so large for highly educated groups
+
+```{r}
+
+l2 = glm(health ~ wage * education + race, data = Wage, family=binomial())
+plot_model(l2, type = "pred", terms = c("wage", "education"), ci.lvl = NA )
+
+```
+
+
+## test 

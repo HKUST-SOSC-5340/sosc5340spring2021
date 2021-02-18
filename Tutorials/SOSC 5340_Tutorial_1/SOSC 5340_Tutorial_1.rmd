@@ -1,0 +1,315 @@
+---
+title:  "SOSC 5340 Tutorial One"
+subtitle: "Standard Errors and Bootstrap"
+author: |
+  | *Yabin YIN*
+  | *HKUST*
+date: |
+  | *Feb, 2021*
+output: 
+  pdf_document:
+    # number_sections: false
+    keep_tex: true
+    # fig_caption: true
+    # latex_engine: pdflatex
+citecolor: red
+fontsize: 8pt
+linestretch: 1
+geometry: margin=1in
+---
+
+## Set working directory to the current directory
+
+```{r eval=FALSE, include=FALSE}
+# need to install rstudioapi
+library(rstudioapi)
+# get current directory and set it as working directory
+rstudioapi::getActiveDocumentContext
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# clear environment
+rm(list = ls())
+```
+
+*Remark:* Need to save current R file before using *getActiveDocumentContext*
+
+## R Packages
+
+**R** packages for robust and cluster standard errors:
+
+- *sandwich*: <https://cran.r-project.org/web/packages/sandwich>
+- *estimatr*: <https://cran.r-project.org/web/packages/estimatr>
+- *clubSandwich*: <https://cran.r-project.org/web/packages/clubSandwich>
+- Read the *reference manual* and *vignettes*.
+- We will focus on the *sandwich* package. Please try other packages yourself.
+
+**R** packages for output tables:
+
+- *texreg*: <https://cran.r-project.org/web/packages/texreg/texreg.pdf>
+- *stargazer*: <https://cran.r-project.org/web/packages/stargazer/stargazer.pdf>
+- *starpolishr*: <https://github.com/ChandlerLutz/starpolishr>
+
+**Latex**
+- *overleaf*: <https://www.overleaf.com/> online platform
+- *Latex*: <https://www.latex-project.org/get/> 
+
+
+## Empirical Example: *Aghion, Van Reenen, and Zingales (2013 AER)*
+
+@Aghion2013Innovation studied the relationship between institutional ownership and innovation. We replicate column 1 of Table 1 of this paper (see page 283).
+
+### Robust Standard Errors
+
+```{r}
+# require the packages
+library(sandwich)
+library(lmtest)
+library(texreg)
+library(stargazer)
+library(starpolishr)
+library(tinytex)
+
+# load the data: from the "sandwich" package
+data("InstInnovation")
+
+# classic s.e.
+lm_classic <- lm(log(cites+1)~institutions+log(I(capital/employment)+1)+log(sales+1)
+                 +factor(industry)+factor(year), # industry dummies and time dummies
+                 data = InstInnovation)
+# robust s.e.
+lm_r_sandwich <- coeftest(lm_classic, vcov. = vcovHC(lm_classic, type = "HC0"))
+
+# show the results
+stargazer(lm_classic, lm_classic,
+          se = list(summary(lm_classic)$coefficients[,2],
+                             lm_r_sandwich[,2]),
+          column.labels = c("ln(Cites) classic", "ln(Cites) robust"),
+          dep.var.labels.include = F,
+          keep = c("institutions", 'capital/employment', 'sales'),
+          covariate.labels = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          digits = 4, no.space=TRUE, column.sep.width = "1pt",
+          add.lines = list(c('Industry FE', 'Y', 'Y'), 
+                           c('Year FE', 'Y', 'Y')),
+          omit.stat = c("ser","f"),
+          type = 'text')
+
+# alternative way: screenreg from texreg
+screenreg(list(lm_classic, lm_classic),
+          custom.model.names = c("ln(Cites) classic", "ln(Cites) robust"),
+          custom.coef.names = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          override.se = list(summary(lm_classic)$coefficients[,2],
+                             lm_r_sandwich[,2]),
+          override.pvalues = list(summary(lm_classic)$coefficients[,4],
+                                  lm_r_sandwich[,4]),
+          omit.coef = c("(Intercept)|(industry)|(company)|(year)"),
+          custom.gof.rows = list('Industry FE' = c('Y', 'Y'), 
+                           'Year FE' = c('Y', 'Y')),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4)
+```
+
+*Remark:* Using *stragazer* function, we can make publishable tables showing coefficients, robust standard errors and other information,
+we can change labels of dependent variables and independent variables, omit variables and statistics, and add customized information.
+
+When using *screenreg* (also, *texreg* or *htmlreg*) function to show regression results with robust standard errors, we have to put the fitted model with classic s.e. in the *list()* then use the *override.se* and *override.pvalues* arguments to override the classic s.e. and p-value, otherwise we cannot get $R^2$ and *Num. obs.* and other statistics.
+
+
+### Cluster Standard Errors
+
+Now suppose that we are concerned that
+
+- *(i)* firms within the same four-digit industry might be correlated, so we have to adjust the standard errors by clustering at the four-digit industry level;
+- *(ii)* there might be persistence over time for each firm, so we have to cluster at the firm level;
+- *(iii)* there are macro common shocks to all firms in a given year, so we have to cluster at the year level;
+- *(iv)* how about clustering at both firm and year levels? 
+
+```{r}
+# cluster: industry
+lm_clu_industry <- coeftest(lm_classic,
+                            vcov. = vcovCL(lm_classic,
+                                           cluster = InstInnovation$industry,
+                                           type = "HC0"))
+# cluster: firm
+lm_clu_firm <- coeftest(lm_classic,
+                        vcov. = vcovCL(lm_classic,
+                                       cluster = InstInnovation$company,
+                                       type = "HC0"))
+# cluster: year
+lm_clu_year <- coeftest(lm_classic,
+                        vcov. = vcovCL(lm_classic,
+                                       cluster = InstInnovation$year,
+                                       type = "HC0"))
+# cluster: firm + year
+lm_clu_twoway <- coeftest(lm_classic,
+                          vcov. = vcovCL(lm_classic,
+                                         cluster = InstInnovation[,c("company",
+                                                                     "year")],
+                                         type = "HC0"))
+# show the results
+stargazer(lm_classic, lm_classic, lm_classic, lm_classic,
+          se = list(lm_clu_industry[,2], lm_clu_firm[,2],
+                    lm_clu_year[,2], lm_clu_twoway[,2]),
+          column.labels = c("ln(Cites) ind", "ln(Cites) firm",
+                                 "ln(Cites) year", "ln(Cites) fi+ye"),
+          dep.var.labels.include = F,
+          keep = c("institutions", 'capital/employment', 'sales'),
+          covariate.labels = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          digits = 4, no.space=TRUE, column.sep.width = "1pt",
+          add.lines = list(c('Industry FE', 'Y', 'Y', "Y", 'Y'), 
+                           c('Year FE', 'Y', 'Y', "Y", 'Y')),
+          omit.stat = c("ser","f"),
+          type = 'text')
+```
+
+*Remark:* The coefficients do not vary across columns because we only adjust the standard errors that are changing across columns.
+
+
+### Output latex table
+You may copy paste the output latex into your .tex file or directly output that to a file.
+```{r, echo = F, message = FALSE}
+
+table_robust <- stargazer(lm_classic, lm_classic,
+          se = list(summary(lm_classic)$coefficients[,2],
+                             lm_r_sandwich[,2]),
+          column.labels = c("ln(Cites) classic", "ln(Cites) robust"),
+          dep.var.labels.include = F,
+          keep = c("institutions", 'capital/employment', 'sales'),
+          covariate.labels = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          digits = 4, no.space=TRUE, column.sep.width = "1pt",
+          add.lines = list(c('Industry FE', 'Y', 'Y'), 
+                           c('Year FE', 'Y', 'Y')),
+          omit.stat = c("ser","f"),
+          type = 'latex', title = 'Robust Standard Error')
+
+
+table_cluster <- texreg(list(lm_classic, lm_classic, lm_classic, lm_classic),
+          custom.model.names = c("ln(Cites) ind", "ln(Cites) firm",
+                                 "ln(Cites) year", "ln(Cites) fi+ye"),
+          custom.coef.names = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          override.se = list(lm_clu_industry[,2], lm_clu_firm[,2],
+                    lm_clu_year[,2], lm_clu_twoway[,2]),
+          override.pvalues = list(lm_clu_industry[,4], lm_clu_firm[,4],
+                    lm_clu_year[,4], lm_clu_twoway[,4]),
+          omit.coef = c("(Intercept)|(industry)|(company)|(year)"),
+          custom.gof.rows = list('Industry FE' = c('Y', 'Y', "Y", 'Y'), 
+                           'Year FE' = c('Y', 'Y', "Y", 'Y')),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4, caption = 'Cluster Standard Error', caption.above = T)
+
+
+star_tex_write(table_robust, table_cluster, file = 'table1.tex', headers = T)
+
+```
+
+*Remark:* 
+
+- in Stargazer, using *star_tex_write* to output latex code as *.tex* file
+- in texreg, add *file=XXX.tex* to output latex code as *.tex* file
+
+
+### Last, in Rmarkdown, you can also directly output the table as a \LaTeX table
+
+
+(note the *results='asis'* option; that is how you output table as \LaTeX directly)
+```{r, echo = F, message = FALSE, results='asis'}
+
+texreg(list(lm_classic, lm_classic, lm_classic, lm_classic),
+          custom.model.names = c("ln(Cites) ind", "ln(Cites) firm",
+                                 "ln(Cites) year", "ln(Cites) fi+ye"),
+          custom.coef.names = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          override.se = list(lm_clu_industry[,2], lm_clu_firm[,2],
+                    lm_clu_year[,2], lm_clu_twoway[,2]),
+          override.pvalues = list(lm_clu_industry[,4], lm_clu_firm[,4],
+                    lm_clu_year[,4], lm_clu_twoway[,4]),
+          omit.coef = c("(Intercept)|(industry)|(company)|(year)"),
+          custom.gof.rows = list('Industry FE' = c('Y', 'Y', "Y", 'Y'), 
+                           'Year FE' = c('Y', 'Y', "Y", 'Y')),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4, caption = 'Cluster Standard Error', caption.above = T)
+```
+
+
+## Bootstrap
+
+Now, let's use a small sample of Chinese 2005 mini-census data. Our mean focus is on the relation among income, education and gender.
+
+```{r}
+library(readstata13)
+# import dataset
+census <- read.dta13('2005census.dta')
+# fit the model
+lm_census <- lm(log(income+1)~educ*factor(female)+factor(ifwork), data = census)
+summary(lm_census)
+
+# We are interested in coef. on "education+education*female"
+# obtain the bootstrap estimates 
+bs_estimate <- c()
+set.seed(333)
+for (i in 1:1000) {
+  # sampling with replcement
+  data <- census[sample(nrow(census), size = 2000, replace = TRUE), ]
+  # run the regression with the bootstrap sample
+  bootstrap <- lm(log(income+1)~educ*factor(female)+factor(ifwork), data = data)
+  # save coef. on "institutions"
+  bs_estimate <- c(bs_estimate, coef(bootstrap)[2]+coef(bootstrap)[6])
+}
+
+# bootstrap estimators
+summary(bs_estimate)
+
+# standard deviation of bootstrap estimator
+sd(bs_estimate) # bs s.e.
+
+# hypothesis testing: H_0: coef. on "institution" = 0
+# 0 falls into ci_bs, so fail to reject H_0.
+ci_bs <- c(quantile(bs_estimate, 0.025), quantile(bs_estimate, 0.975))
+ci_bs
+
+```
+
+
+## Dignose multicolinearity
+
+```{r}
+library(olsrr)
+# fit model
+lm_vif <- lm(n_child~educ+I(log(income+1))+nroom_h+nsm_h+factor(ifwork), data = census)
+# show the result
+screenreg(list(lm_vif),
+          custom.model.names = c('number of children'),
+          custom.coef.names = c("Y_schooling", "ln(income)", "n_room", 
+                                "area", 'ifwork_not work', 'ifwork_others'),
+          override.se = list(summary(lm_vif)$coefficients[,2]),
+          override.pvalues = list(summary(lm_vif)$coefficients[,4]),
+          omit.coef = c("Intercept"),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4)
+
+# dignose multicolinearity
+ols_vif_tol(lm_vif)
+```
+
+
+
+## References
+
+---
+references:
+
+- id: Aghion2013Innovation
+  title: Innovation and Institutional Ownership
+  author:
+  - family: Aghion
+    given: Philippe
+  - family: Van Reenen
+    given: John
+  - family: Zingales
+    given: Luigi
+  container-title: American Economic Review
+  volume: 103
+  issue: 1
+  page: 277–304
+  type: article-journal
+  issued:
+    year: 2013
+
+---

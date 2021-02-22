@@ -1,0 +1,223 @@
+---
+title: "Lecture 4"
+output: pdf_document
+---
+```{r}
+# load some required packages
+library(ggplot2)
+library(reshape2)
+library(nlme)
+library(ISLR)
+library(foreign)
+library(AER)
+library(MASS)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(boot)
+library(texreg)
+
+```
+
+
+# Multinominal and Ordered Logits
+
+## Ordered logits
+
+We will be using data from the World Values Surveys 1995-1997 for Australia, Norway, Sweden, and the United States from ‘carData’ package in R.
+
+Our outcome is :
+- Poverty is the multi-class ordered dependent variable with categories — ‘Too Little’, ‘About Right’ and ‘Too Much’. We have the following five independent variables
+
+Predictors are:
+
+Religion: member of a religion -no or yes
+Degree: held a university degree -no or yes
+Country: Australia, Norway, Sweden or the USA
+Age: age (years)
+Gender: male or female
+
+
+```{r}
+library(carData)
+data (WVS)
+head(WVS)
+
+```
+
+
+```{r}
+ordered_logit <- polr(poverty~religion+degree+country+age+gender, data = WVS, Hess = TRUE)
+summary(ordered_logit)
+```
+Intercepts here are just cut-offs
+
+
+This model returns no p-values. How can we perform hypothesis testing (e.g., regression coefficients are not zero?)
+
+This will be leave as an exercise
+
+## multinomial regressions
+
+
+The data set contains variables on 200 students. 
+
+- The outcome variable is prog, program type (general, vocation and academic)
+- The predictor variables are social economic status, ses, a three-level categorical variable and writing score, write, a continuous variable. 
+```{r}
+ml <- read.dta("https://stats.idre.ucla.edu/stat/data/hsbdemo.dta")
+
+```
+
+
+We run multinomial regression. The first category is used as the reference group, here general
+
+
+```{r}
+library(nnet)
+multinomial <- multinom(prog ~ ses + write, data = ml)
+summary(multinomial)
+```
+
+There are two sets of coefficients, for each category (leaving out the reference group).
+
+
+# Hypothesis Testing using Likelihood Ratio Test
+
+## Likelihood Ratio Test between two logistic regressions
+
+Examples are drawn from 
+
+https://data.princeton.edu/wws509/r/overdispersion
+
+THe data is from Long, J. Scott. 1990. The Origins of Sex Differences in Science. Social Forces. 68(3):1297-1316
+
+The outcome i the number of publications produced by Ph.D. biochemists to illustrate the application of Poisson, over-dispersed Poisson, negative binomial and zero-inflated Poisson models.
+
+
+
+
+- art: articles in last three years of Ph.D.
+
+THere are five predictors available:
+
+
+
+- fem:	coded one for females
+- mar:	coded one if married
+- kid5:	number of children under age six
+- phd:	prestige of Ph.D. program
+- ment:	articles by mentor in last three years
+
+
+First, compare variance and mean. Variance > mean which suggests sign of dispersion
+```{r cars}
+
+ab <- read.dta("http://www.stata-press.com/data/lf2/couart2.dta")
+mean(ab$art)
+var(ab$art)
+```
+
+Let us fit a simple Poisson model with all predictors
+
+```{r}
+mp <- glm(art~fem+mar+kid5+phd+ment, family=poisson, data=ab)
+summary(mp)
+```
+
+We test dispersion using Cameron and Trivedi's dispersion test.
+p value is very small, and we find support for using a model with dispersion parameter.
+```{r}
+dispersiontest(mp)
+```
+
+## now run some negative binomial models
+
+```{r pressure, echo=FALSE}
+mnb <- glm.nb(art~fem+mar+kid5+phd+ment, data=ab)
+summary(mnb)
+```
+
+### use likelihood ratio test to compare Poisson and Negative Binomial regression fits
+we see that `glm()` does not automatically return log likelihood estimate, but do not worry, we can use `logLik()` to get it. 
+
+`glm.nb()` in MASS package is better since it directly gives us the 2* log L: -3121.917. But to illustrate, we also use `logLik` to get it.
+```{r}
+logL_null = logLik(mp)
+logL_alternative = logLik(mnb)
+print (logL_null)
+print (logL_alternative)
+
+```
+
+$D$ is the difference between two likelihoods *2, with degree of freedom of more complex model - simpler model.
+
+```{r}
+#D = 2*( as.numeric(logL_alternative) - as.numeric(logL_null))
+D = 2 *(logL_alternative - logL_null)
+D
+
+```
+
+What is the probability we observe $D$ less than the currently observed 180.196?
+
+```{r}
+pchisq(180.196, 1)
+```
+
+This means that the probability we observe $D$ equals to or larger than 180.196 is 0. 
+In other words, $D$ is very unlikely to be observed under the null hypothesis. It is more likely to be observed under the alternative hypothesis.
+
+Of course, we can do the above likelihood ratio test, using the `lrtest` model.
+It basically did exactly what we did under the hood, with some nicer formatting.
+```{r}
+lrtest (mp, mnb)
+```
+
+## We can not only do likelihood ratio test between models, we can also compare the same model with different predictors
+
+Let us run a simpler model with four predictors. 
+We do not want the phd prestige as predictor, because it is not statistically significant.
+
+(note: simpler model is always the null model in likelihood ratio test)
+```{r}
+mp0 <- glm(art~fem+mar+kid5 + ment , family=poisson, data=ab)
+summary(mp)
+```
+
+Now compare the simpler model mp0 with four predictors, and complex model mp with five predictors
+```{r}
+lrtest(mp0, mp)
+```
+
+The likelihood ratio test suggests that you should indeed drop phd prestige as a predictor, or favoring the null model.
+
+This is the statistical way to do model selection.
+
+Of course, if you have theoretical reason to add phd prestige as an important predictor, you may well do so.
+
+## last, let us compare zero-inflated poission with negative binomial fit
+```{r}
+library(pscl)
+mzip <- zeroinfl(art~fem+mar+kid5+phd+ment, data=ab)
+summary(mzip)
+```
+
+You can see clearly the two-part model. Binomial basically models the excess zeros.
+
+Zero-inflated Poisson and NEgative Binomial differs too much: they are not a simpler version of the other.
+
+So we cannot directly use likelihood ratio test.
+
+We calculate AIC for two models
+```{r}
+AIC(mzip)
+# AIC of negative binomial is directly given by the model
+AIC_nb = 3135.9
+```
+
+- AIC of negative binomial is 3135.9
+- AIC of zero-inflated is 3233
+
+
+Negative binomial is the better model: smaller AIC.

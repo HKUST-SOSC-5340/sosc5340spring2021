@@ -1,0 +1,539 @@
+---
+title:  "SOSC 5340 Tutorial 2"
+subtitle: "GLM and Machine Learning Basics"
+author: |
+  | *Yabin YIN*
+  | *HKUST*
+date: |
+  | *Mar, 2021*
+output: 
+  pdf_document:
+    # number_sections: false
+    keep_tex: true
+    # fig_caption: true
+    # latex_engine: pdflatex
+citecolor: red
+fontsize: 8pt
+linestretch: 1
+geometry: margin=1in
+---
+
+# Set working directory to the current directory
+
+```{r eval=FALSE, include=FALSE}
+options(tinytex.verbose = TRUE)
+# need to install rstudioapi
+library(rstudioapi)
+# get current directory and set it as working directory
+rstudioapi::getActiveDocumentContext
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# clear environment
+rm(list = ls())
+```
+
+*Remark:* Need to save current R file before using *getActiveDocumentContext*
+
+# R Packages
+
+**R** packages for multinomial logit regression:
+
+- *mlogit*: <https://cran.r-project.org/web/packages/mlogit>
+- *mnlogit*: <https://cran.r-project.org/web/packages/mnlogit>
+- *multinom*: <https://cran.r-project.org/web/packages/nnet>
+
+- Read the *reference manual* and *vignettes*.
+- We will focus on the *multinom* function from *nnet* package. Please try other packages yourself.
+
+**R** packages for ordinal logit regression:
+
+- *polr*: <https://rdrr.io/cran/MASS/man/polr.html>
+- *oglmx*: <https://cran.r-project.org/web/packages/oglmx>
+
+**R** packages for LASSO and Ridge:
+
+- *glmnet*: <https://cran.r-project.org/web/packages/glmnet>
+
+**R** packages for Tree and Forests:
+
+- *tree*: <https://cran.r-project.org/web/packages/tree>
+- *randomForest*: <https://cran.r-project.org/web/packages/randomForest>
+
+**R** packages for imputing missing values:
+
+- *mice*: <https://cran.r-project.org/web/packages/mice>
+- Other packages: <https://www.analyticsvidhya.com/blog/2016/03/tutorial-powerful-packages-imputing-missing-values/>
+
+
+# Multinomial Logit Regression
+
+## Empirical example:
+
+Entering high school students make program choices among **general program**, **vocational program** and **academic program**. Their choice might be modeled using their **writing score** and their **social economic status**.
+
+```{r}
+# require the packages
+library(foreign)
+library(tinytex)
+
+# load the data
+hsbdemo <- read.dta("https://stats.idre.ucla.edu/stat/data/hsbdemo.dta")
+```
+
+The data set contains variables on 200 students. The outcome variable is **prog**, program type. The independent variables are social economic status, **ses**, a three-level categorical variable and writing score, **write**, a continuous variable. Let’s start with getting some descriptive statistics of the variables of interest.
+
+```{r}
+## ses by program types 
+with(hsbdemo, table(ses, prog))
+## avg.writing score by program types
+with(hsbdemo, do.call(rbind, tapply(write, prog, function(x) c(M = mean(x), SD = sd(x)))))
+```
+
+Let's use the `multinom` function from the `nnet` package to estimate a multinomial logistic regression model. 
+
+```{r}
+## library the package
+library(nnet)
+library(stargazer)
+
+## set reference group: academic program
+hsbdemo$prog2 <- relevel(hsbdemo$prog, ref = "academic")
+
+## run multinomial logit regression
+mlogit1 <- multinom(prog2 ~ ses + write, data = hsbdemo)
+summary(mlogit1)
+
+## Wald-tests (here z-tests)
+z_score <- summary(mlogit1)$coefficients/summary(mlogit1)$standard.errors
+z_score
+
+## p-values (2-tailed)
+p_value <- (1 - pnorm(abs(z_score), 0, 1)) * 2
+p_value
+
+# report the results
+stargazer(mlogit1, type='text', no.space = T)
+
+```
+
+If we consider our coefficients from the first column to be $b_1$ and our coefficients from the second column to be $b_2$, we can write our model equations:
+$$ln\frac{P(prog = general)}{P(prog=academic)}=b_{10}+b_{11}(ses=2)+b_{12}(ses=3)+b_{13}write$$
+$$ln\frac{P(prog = vocation)}{P(prog=academic)}=b_{20}+b_{21}(ses=2)+b_{22}(ses=3)+b_{23}write$$
+
+## Interpretation:
+
+*Continuous Variable (write)*
+
+**$b_{13}$** A one-unit increase in the variable write is associated with the decrease in the **log odds** of choosing general program rather than academic program in the amount of 0.058. Or you can say, a 1-unit increase in the variable write will decrease the **odds** of being in general program rather than academic program to exp(-0.058)=0.94.
+
+**$b_{23}$** A one-unit increase in the variable write is associated with the decrease in the **log odds** of being in vocation program vs. academic program. in the amount of 0.1136. A 1-unit increase in the variable write will decrease the **odds** of being in general program rather than academic program by 1-exp(-0.1136)=0.107.
+
+*Categorical Variable (ses)*
+
+**$b_{11}$** The **log odds** of choosing general program rather than academic program for middle SES students is 0.533 lower than that of high SES students. Or, the **odds ratio** of choosing general program rather than academic program for middle SES students is exp(-0.533)=0.586 of that figure for lower SES students.
+
+**$b_{21}$** The **log odds** of choosing vocation program rather than academic program for middle SES students is 0.291 higher than that of high SES students. Or, the **odds ratio** of choosing general program rather than academic program for middle SES students is exp(0.291)=1.33 times of that figure for lower SES students.
+
+*Probability*:
+
+If we want to examine the changes in predicted probability associated with one of our two variables, we can create small dataframe varying one variable while holding the other constant.
+
+We will do this holding write at its mean and examining the predicted probabilities for each level of ses.
+
+```{r}
+dses <- data.frame(ses = c("low", "middle", "high"), write = mean(hsbdemo$write))
+predict(mlogit1, newdata = dses, "probs")
+```
+
+
+# Ordinal Logit Regression
+
+## Example: 
+
+To understand the working of Ordinal Logistic Regression, we’ll consider a study from *World Values Surveys*, which looks at factors that influence people’s perception of the government’s efforts to reduce poverty.
+
+Our objective is to predict an individual’s perception about government’s effort to reduce poverty based on factors like individual’s country, gender, age etc. In the given case study, individual’s perception can take the following three values - **Too Little**, **About Right**, **Too Much**.
+
+```{r}
+## library packages
+library(carData)
+
+## load the data
+data(WVS)
+head(WVS)
+```
+
+- *religion*: member of a religion -no or yes
+- *degree*: held a university degree -no or yes
+- *country*: Australia, Norway, Sweden or the USA
+- *age*: age (years)
+- *gender*: male or female
+
+We’ll now fit the Ordinal Logit Regression model using `polr` function from the `MASS` package.
+
+```{r}
+## library packages
+library(MASS)
+
+## fit ologit model
+ologit1 <- polr(poverty ~ religion+degree+country+age+gender, data = WVS, Hess = TRUE)
+summary(ologit1)
+
+## p_value
+p_value2 <- pnorm(abs(coef(summary(ologit1))[,'t value']),lower.tail = FALSE)* 2
+summary_table <- cbind(coef(summary(ologit1)), 'pval'=round(p_value2,3))
+summary_table
+```
+
+## Interpretation
+
+Let J be the total number of categories of the dependent variable *(poverty)*.
+
+- *j=1* refers to "Too Little"
+- *j=2* refers to "About Right"
+- *j=3* refers to "Too Much"
+
+$$Logit(Y\leq 1|X_i)=\alpha_1+\sum \beta_i X_i; \; P(Y\leq 1|X_i)=Logit^{-1}(\alpha_1+\sum \beta_i X_i)$$
+$$Logit(Y\leq 2|X_i)=\alpha_2+\sum \beta_i X_i; \; P(Y\leq 2|X_i)=Logit^{-1}(\alpha_2+\sum \beta_i X_i)$$
+$$P(1 < Y\leq 2|X_i)=P(Y\leq 2|X_i)-P(Y\leq 1|X_i)=Logit^{-1}(\alpha_2+\sum \beta_i X_i)- Logit^{-1}(\alpha_1+\sum \beta_i X_i)$$
+
+*Coefficients*:
+
+**gender**: The log odds (odds ratio) of having a positive perception about government’s efforts to reduce poverty of male is 0.176 higher (1.19 times) compared with female.
+
+**age**: With one unit increase in age the log odds of having a positive perception about government’s efforts to reduce poverty increases by 0.011.
+
+*Intercepts*:
+
+- Mathematically, the intercept **‘Too Little | About Right’** corresponds to **Logit(P(Y <= 1))**. It can be interpreted as the log odds of believing that the government is doing **‘Too Little’** versus believing that the government is doing **‘About Right’ or ‘Too Much’** is of 0.72 higher.
+
+- Similarly, the intercept **‘About Right | Too Much’** corresponds to **Logit[P(Y <= 2)]**. It can be interpreted as the log of odds of believing that the government is doing **‘Too Little’ or ‘About Right’** versus believing that the government is doing **‘Too Much’** is of 2.53 times.
+
+*Probability*
+
+- The probability corresponding to **Too Little** perception will be calculated as:
+$$Logit[P(Y \le 1)] = 0.7298 -[(0.17973*1)+(0.14092*0)+(-0.32235*1)+(0.01114*30)+(0.17637*1)]\\
+Logit[P(Y \le 1)] = 0.36185\\
+P(Y \le 1)= P(Y=1)=\frac{exp(0.36185)}{1+exp(0.36185)} = 0.589$$
+
+- Similarly, the probability corresponding to **About Right** perception will be calculated as:
+$$Logit[P(Y \le 2)] = 2.5325 -[(0.17973*1)+(0.14092*0)+(-0.32235*1)+(0.01114*30)+(0.17637*1)]\\
+Logit[P(Y \le 2)] =2.16455\\
+P(Y \le 2)= \frac{exp(2.16455)}{1+exp(2.16455)} = 0.897\\
+P(Y = 2) = P(Y \le 2) — P(Y \le 1) = 0.897 -0.589=0.308$$
+
+- The probability corresponding to **Too Much** perception will be calculated as:
+$$P(Y = 3) = 1-P(Y \le 2)=0.103$$
+
+
+## Computation in R
+
+Now, let's use `predict` function in R to complete above mathematical calculation.
+
+```{r}
+pred <- round(predict(ologit1,WVS,type = "probs"), 3)
+head(pred)
+
+new_data <- data.frame("religion"="yes","degree"="no","country"="Norway","age"=30,
+                       "gender"="male")
+round(predict(ologit1, new_data, type = "probs"), 3)
+```
+
+
+# LASSO
+
+We use `glmnet` function to fit LASSO and Ridge model. Let's first review the estimation:
+$$\hat\beta_{LASSO}=argmin_\beta \sum_{i=1}^n (Y_i-X_i\beta)^2+\lambda \sum_{j=1}^p|\beta_j|$$
+$$\hat\beta_{Ridge}=argmin_\beta \sum_{i=1}^n (Y_i-X_i\beta)^2+\lambda \sum_{j=1}^p\beta_j^2$$
+The tuning parameter $\lambda$ controls the overall strength of the penalty.
+
+The **Ridge** penalty shrinks the coefficients of correlated predictors towards each other while the **LASSO** tends to pick one of them and discard the others.
+
+## Example: LASSO
+
+```{r}
+## library packages
+library(glmnet)
+
+## load data
+data(QuickStartExample) # The command loads an input matrix x and a response vector y
+
+## fit LASSO model
+lasso <- glmnet(x, y, alpha = 1)
+```
+
+*Notes:* **alpha**=1 (default) specifies the model to be LASSO, and **alpha**=0 tells R to fit a Ridge model. We will focus on LASSO in this tutorial, try to fit a Ridge model by yourself.
+
+### Describe the model
+
+*“lasso”* is an object of class `glmnet` that contains all the relevant information of the fitted model for further use. We do not encourage users to extract the components directly. Instead, various methods are provided for the object such as `plot`, `print`, `coef` and `predict` that enable us to execute those tasks more elegantly.
+
+```{r}
+## visualize the coefficients
+### x-axis1: lambda
+plot(lasso, xvar = 'lambda')
+### x-axis2: L1 Norm
+plot(lasso)
+```
+
+- **Y-axis:** Regularized coefficients for each variable (ie. coefficients after penalization is applied).
+- **X-axis1:** Logarithm of the penalization parameter Lambda ($\lambda$). The higher value of lambda indicates more regularization (ie. reduction of the coefficient magnitude, or shrinkage).
+- **X-axis2:** L1 Norm ($\sum_{j=1}^p|\beta_j|$). The sum of absolute values of estimated coefficients. L1 Norm is small when $\lambda$ is large.
+- **Curve:** Change in the predictor coefficients as the penalty term increases.
+- **Numbers on top:** The number of variables in the regression model.
+- **Log Lambda = 0** corresponds to “no regularization” (ie. regular linear model with minimum residual sum of squares).
+
+```{r}
+print(lasso)
+```
+
+- **DF:** the number of nonzero coefficients.
+- **%dev:** the percent (of null) deviance explained.
+- **$\lambda$:** the value of $\lambda$.
+
+We can obtain the actual coefficients at one or more $\lambda$ within the range of the sequence
+
+```{r}
+coef(lasso,s=0.1)
+```
+
+
+### Cross Validation
+
+The function `glmnet` returns a sequence of models for the users to choose from. In many cases, users may prefer the software to select one of them. **Cross-validation** is perhaps the simplest and most widely used method for that task.
+
+```{r}
+## cross validation using `cv.glmnet`
+cv.lasso <- cv.glmnet(x, y, alpha = 1)
+## plot
+plot(cv.lasso)
+```
+
+It includes the cross-validation curve (red dotted line), and upper and lower standard deviation curves along the $\lambda$ sequence (error bars). Two selected $\lambda$'s are indicated by the vertical dotted lines (see below).
+
+- The left line: **log(lambda.min)**. `lambda.min` is the minimum value of lambda that results in the **smallest cross-validation error**. This is calculated by dividing the dataset in 10 subsets, followed by the calculation of fit in 9/10 of the subsets and testing the predicted model on the remaining 1/10.
+
+- The right line: **log(lambda.1se)**. `lambda.1se` is the largest value of lambda (i.e. more regularized) within the 1 standard error of the `lambda.min`. This `lambda.1se` value corresponds to a higher level of penalization (i.e. more regularized model) and can be chosen for a simpler model in predictions (less impact from from coefficients).
+
+```{r}
+## View the selected lambda’s and the corresponding coefficients.
+cv.lasso$lambda.min
+cv.lasso$lambda.1se
+coef(cv.lasso, s = "lambda.min")
+
+## Prediction
+predict(cv.lasso, newx = x[1:5,], s = "lambda.min")
+```
+*Notes:* `newx` is for the new input matrix; `s` is the value(s) of $\lambda$ at which predictions are made.
+
+
+# Decision Tree and Forests
+## Decision Trees
+
+We will use `tree` package in R. As for data, we use **Carseats** dataset from `ISLR` package.
+
+```{r}
+## library packages
+library(tree)
+library(party)
+library(ISLR)
+
+## load data
+data(Carseats, package="ISLR")
+```
+
+*Description of the data:*
+
+- **Sales:** unit sales in thousands;
+- **CompPrice:** price charged by competitor at each location;
+- **Income:** community income level in 1000s of dollars;
+- **Advertising:** local ad budget at each location in 1000s of dollars;
+- **Population:** regional pop in thousands;
+- **Price:** price for car seats at each site;
+- **ShelveLoc:** Bad, Good or Medium indicates quality of shelving location;
+- **Age:** age level of the population;
+- **Education:** education level at location;
+- **Urban:** Yes/No;
+- **US:** Yes/No.
+
+```{r}
+## fit the tree
+tree.carseats <- tree(Sales ~ .-Sales, data=Carseats)
+
+## see the tree
+summary(tree.carseats)
+plot(tree.carseats)
+text(tree.carseats, pretty = 0)
+tree.carseats
+```
+
+### Use Cross-Validation to Prune a Tree
+
+Let's create a training set and a test by splitting the **Carseats** dataframe into 250 training and 150 test samples. 
+
+```{r}
+## sampling for training set
+set.seed(333)
+train <- sample(1:nrow(Carseats), 250)
+
+## refit the tree using training set
+train.carseats <- tree(Sales ~.-Sales, Carseats, subset = train)
+plot(train.carseats)
+text(train.carseats, pretty = 0)
+
+## predict on the test set
+tree.pred <- predict(train.carseats, newdata = Carseats[-train,])
+
+## evaluate the error, estimate MSE
+y = Carseats[-train, "Sales"]
+print(mean((y-tree.pred)^2))
+```
+
+Next, let's use cross-validation to **prune** the tree optimally. We now prune the tree using cross-validation with the `cv.tree()` function.
+
+```{r}
+## cross validation
+cv.carseats <- cv.tree(train.carseats)
+plot(cv.carseats$size, cv.carseats$dev, type='b')
+```
+
+The cross-validation results suggests that the most complex tree is the best one. We can try pruning this tree to keep 12 terminal nodes, so let's prune the tree to **size=12**.
+
+```{r}
+## prune the tree
+prune.carseats <- prune.tree(train.carseats, best = 12)
+plot(prune.carseats)
+text(prune.carseats, pretty=0)
+```
+
+It's a bit shallower than previous trees, and you can actually read the labels. Let's evaluate it on the test dataset again.
+
+```{r}
+## predict on test set
+tree.pred.cv <- predict(prune.carseats, newdata = Carseats[-train,])
+
+## evaluate the error, estimate MSE
+y <- Carseats[-train, "Sales"]
+print(mean((y-tree.pred.cv)^2))
+```
+
+Seems like the MSE increase a little bit, but it gives you a simpler tree.
+
+## Bagging
+
+In bagging, we use bootstrapping to generate *B* separate training sets and train a tree on each of them. The predictions are then averaged. For each training set, the data not selected is known as the out-of-bag sample, and is used to evaluate the prediction. The average prediction is given by:
+$$\hat f_{bag}(x)=\frac{1}{B}\sum_{b=1}^B \hat f^{*b}(x)$$
+
+Bagging overcomes a shortcoming of single decision trees that can give different tree structures when built on different samples of the input data. We use the `randomForest` package to realize that in R.
+
+```{r}
+## library packages
+library(randomForest)
+
+## fit the model
+bag.carseats <- randomForest(Sales ~.-Sales, data=Carseats, subset=train, mtry=ncol(Carseats)-1, importance=TRUE) ## set the number of variables using `mtry`
+bag.carseats
+```
+
+This spawns 500 trees. Let’s evaluate the prediction of the bagged model on the test set
+
+```{r}
+## predict on test set
+yhat.bag <- predict(bag.carseats, newdata=Carseats[-train,])
+
+## plot
+carseats.test <- Carseats[-train, "Sales"]
+plot(yhat.bag, carseats.test)
+abline(0,1)
+
+## estimate MSE
+print(mean((carseats.test-yhat.bag)^2))
+```
+
+You will find the MSE is largely reduced comparing with a single Tree.
+
+## Random Forest
+
+**Random forests** is similar to **bagging**, except for each tree, a subset $m=\sqrt p$ of the total number of predictors are used.
+
+```{r}
+## choose m=sqrt(p)
+m = round(sqrt(ncol(Carseats)-1))
+## fit a Random Forest model for training set, `mtry=3`
+rf.carseats = randomForest(Sales ~ .-Sales, data=Carseats, mtry=m, subset=train, importance=TRUE)
+rf.carseats
+
+## predict on test set
+yhat.rf = predict(rf.carseats, newdata=Carseats[-train, ])
+## estimate the MSE
+round(mean((carseats.test  - yhat.rf)^2),2)
+## plot
+plot(yhat.rf, carseats.test)
+abline(0,1)
+```
+
+# Multiple Mutation
+
+We will use `mice` function to do multiple imputations when there are lots of missing values.
+
+```{r}
+## library packages
+library(mice)
+library(missForest)
+## load data
+data("iris")
+```
+
+Then, let’s seed missing values in our data set using `prodNA` function in `missForest` package.
+
+```{r}
+## generate 10% missing values at Random
+set.seed(333)
+iris.mis <- prodNA(iris, noNA = 0.1)
+summary(iris.mis)
+
+## remove categorical variables
+iris.mis <- subset(iris.mis, select = -c(Species))
+
+## check missing values using `md.pattern()` in `mice` package
+md.pattern(iris.mis)
+```
+
+There are 97 observations with no missing values. There are 19 observations with missing values in Sepal.Length. Similarly, there are 10 missing values with Sepal.Width and so on.
+
+Now, let's use `mice` to impute missing values
+
+```{r}
+## imputation
+imputed_Data <- mice(iris.mis, m=5, maxit = 50, method = 'pmm', seed = 333)
+summary(imputed_Data)
+```
+
+*Notes:* 
+- `m=5` refers to the number of imputed datasets is 5; 
+- `method = 'pmm'` refers to the imputation method is **predictive mean matching**, type `methods(mice)` to check others.
+- `maxit=50` refers to the no. of iterations taken to impute missing values is 50
+
+```{r}
+## check imputed data
+imputed_Data$imp$Sepal.Length
+imputed_Data$imp$Sepal.Width
+```
+
+Now we can get back the completed dataset using the `complete()` function. 
+
+```{r}
+## complete dataset, check the 1st of the 5 datasets
+compdata <- complete(imputed_Data, 1)
+summary(compdata)
+```
+
+Our next step is to fit a linear model to the data. There are five imputed datasets, and we need fit a model for each of them and pool the results together.
+
+```{r}
+## pooling
+modelFit <- with(imputed_Data, lm(Sepal.Width ~ Sepal.Length + Petal.Width))
+modelPool <- pool(modelFit)
+summary(modelPool)
+```
+
+

@@ -10,7 +10,7 @@ output:
   pdf_document:
     # number_sections: false
     keep_tex: true
-    # fig_caption: true
+    # fig_caption: true 
     # latex_engine: pdflatex
 citecolor: red
 fontsize: 8pt
@@ -125,13 +125,13 @@ $$ln\frac{P(prog = vocation)}{P(prog=academic)}=b_{20}+b_{21}(ses=2)+b_{22}(ses=
 
 **$b_{13}$** A one-unit increase in the variable write is associated with the decrease in the **log odds** of choosing general program rather than academic program in the amount of 0.058. Or you can say, a 1-unit increase in the variable write will decrease the **odds** of being in general program rather than academic program to exp(-0.058)=0.94.
 
-**$b_{23}$** A one-unit increase in the variable write is associated with the decrease in the **log odds** of being in vocation program vs. academic program. in the amount of 0.1136. A 1-unit increase in the variable write will decrease the **odds** of being in general program rather than academic program by 1-exp(-0.1136)=0.107.
+**$b_{23}$** A one-unit increase in the variable write is associated with the decrease in the **log odds** of being in vocation program vs. academic program. in the amount of 0.1136. A 1-unit increase in the variable write will decrease the **odds** of being in vocation program rather than academic program by 1-exp(-0.1136)=0.107.
 
 *Categorical Variable (ses)*
 
-**$b_{11}$** The **log odds** of choosing general program rather than academic program for middle SES students is 0.533 lower than that of high SES students. Or, the **odds ratio** of choosing general program rather than academic program for middle SES students is exp(-0.533)=0.586 of that figure for lower SES students.
+**$b_{11}$** The **log odds** of choosing general program rather than academic program for middle SES students is 0.533 lower than that of low SES students. Or, the **odds ratio** of choosing general program rather than academic program for middle SES students is exp(-0.533)=0.586 of that figure for lower SES students.
 
-**$b_{21}$** The **log odds** of choosing vocation program rather than academic program for middle SES students is 0.291 higher than that of high SES students. Or, the **odds ratio** of choosing general program rather than academic program for middle SES students is exp(0.291)=1.33 times of that figure for lower SES students.
+**$b_{21}$** The **log odds** of choosing vocation program rather than academic program for middle SES students is 0.291 higher than that of low SES students. Or, the **odds ratio** of choosing vocation program rather than academic program for middle SES students is exp(0.291)=1.33 times of that figure for lower SES students.
 
 *Probability*:
 
@@ -200,7 +200,7 @@ $$P(1 < Y\leq 2|X_i)=P(Y\leq 2|X_i)-P(Y\leq 1|X_i)=Logit^{-1}(\alpha_2+\sum \bet
 
 **gender**: The log odds (odds ratio) of having a positive perception about government’s efforts to reduce poverty of male is 0.176 higher (1.19 times) compared with female.
 
-**age**: With one unit increase in age the log odds of having a positive perception about government’s efforts to reduce poverty increases by 0.011.
+**age**: With one unit increase in age, the log odds of having a positive perception about government’s efforts to reduce poverty increases by 0.011.
 
 *Intercepts*:
 
@@ -334,11 +334,11 @@ We will use `tree` package in R. As for data, we use **Carseats** dataset from `
 ```{r}
 ## library packages
 library(tree)
-library(party)
 library(ISLR)
 
 ## load data
 data(Carseats, package="ISLR")
+head(Carseats, 5)
 ```
 
 *Description of the data:*
@@ -458,6 +458,7 @@ You will find the MSE is largely reduced comparing with a single Tree.
 ```{r}
 ## choose m=sqrt(p)
 m = round(sqrt(ncol(Carseats)-1))
+m
 ## fit a Random Forest model for training set, `mtry=3`
 rf.carseats = randomForest(Sales ~ .-Sales, data=Carseats, mtry=m, subset=train, importance=TRUE)
 rf.carseats

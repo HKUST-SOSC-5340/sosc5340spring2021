@@ -1,0 +1,435 @@
+---
+title:  "SOSC 5340 Tutorial Three"
+subtitle: "Matching, FE, DID, and Causal Forest"
+author: |
+  | *Yabin YIN*
+  | *HKUST*
+date: |
+  | *April, 2020*
+output: 
+  pdf_document:
+    number_sections: false
+    keep_tex: false
+    fig_caption: true
+    latex_engine: pdflatex
+citecolor: red
+fontsize: 8pt
+linestretch: 1
+geometry: margin=1in
+---
+
+# Set working directory to the current directory
+
+```{r eval=FALSE, include=FALSE}
+options(tinytex.verbose = TRUE)
+# need to install rstudioapi
+library(rstudioapi)
+# get current directory and set it as working directory
+rstudioapi::getActiveDocumentContext
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# clear environment
+rm(list = ls())
+```
+
+*Remark:* Need to save current R file before using *getActiveDocumentContext*
+
+
+# R Packages
+
+**R** packages for matching estimator:
+
+- *Matching*: <https://cran.r-project.org/web/packages/Matching/>
+- *MatchIt*: <https://cran.r-project.org/web/packages/MatchIt/index.html>
+- Read the *reference manual* and *vignettes*.
+- Sekhon, J.S. Multivariate and propensity score matching software with automated balance optimization: the matching package for **R**. *Journal of Statistical Software*, 42(7): 1-52, 2011.
+
+**R** packages for FE estimator:
+
+- *plm*: <https://cran.r-project.org/web/packages/plm/index.html>
+  - provides various estimators for linear models for panel data
+  - can adjust standard errors
+  - can perform various tests
+  - can implement IV estimation
+- *lfe*: <https://cran.r-project.org/web/packages/lfe/index.html>
+  - linear models with multiple group fixed effects 
+  - deals with many levels of "fixed effect"
+  - allows for multi-way clustering s.e.
+  - can implement IV estimation
+- *fixest*: <https://cran.r-project.org/web/packages/fixest/index.html>
+  - fast for models with multiple fixed-effects
+  - panel GLM, MLE, and non-linear MLE
+- *pglm*: <https://cran.r-project.org/web/packages/pglm/index.html>
+- Read the *reference manual* and *vignettes*.
+
+**R** packages for Diff-in-Diffs estimator:
+
+DID estimation can be done by the **lm()** function or functions from other packages.
+
+DID is a common stratefy for natural experiments. New:
+
+- Andrew Goodman-Bacon. 2018. Difference-in-Differences with Variation in Treatment Timing. (<https://www.nber.org/papers/w25018>)
+- Anton Strezhnev. 2018. Semiparametric Weighting Estimators for Multi-Period Difference-in-Differences Designs. (<https://www.antonstrezhnev.com/research>)
+
+**R** packages for causal forest:
+
+- *grf*: <https://cran.r-project.org/web/packages/grf/grf.pdf>
+
+
+
+# Matching
+
+We will use `Matching` package to match treatment and control group based on several methods.
+
+We use data from **Dehejia and Wahba (1999 JASA)** as an example. This paper studied the effect of a job training (National Support Work) on the income of its participants. The job training is a random experiment, with 185 obs in the treatment group and 260 in the control group.
+
+- *age*: age;
+- *educ*: years of schooling;
+- *black*: black or not;
+- *hisp*: hispanic or not;
+- *married*: married or not;
+- *nodegr*: have high school diploma or not;
+- *re74*, *re75*, *re78*: real earnings in 1974, 1975 and 1978, respectively;
+- *u74*, *u75*: unemployed or not in 1974 and 1975, respectively;
+- *treat*: participant of job training or not.
+
+```{r}
+## library packages
+library(Matching)
+data('lalonde') ## Dehejia and Wahba (1999 JASA)
+
+## data processing
+Y <- lalonde$re78 ## Y is the dependent variable, income in 1978 (re78)
+Tr <- lalonde$treat ## Tr is an indicator of whether in the treatment group
+
+## estimate the propensity scores using the glm() function
+glm.ps <- glm(Tr ~ age + educ + black + hisp + married + nodegr + re74 + re75,
+            family = binomial,
+            data = lalonde)
+```
+
+Then, we will use `Match` function in `Matching` package to match. type *?Match* to see help document: 
+
+- **Y** is a vector containing the outcome of interest;
+- **Tr** is a vector indicating the observations which are in the treatment regime and those which are not;
+- **X** is a matrix containing the variables we wish to match on. This matrix may contain the actual observed covariates or the propensity score or a combination of both;
+- **estimand** is a character string for the estimand. The default estimand is "ATT";
+- **M** is a scalar for the number of matches which should be found. The default is one-to-one matching;
+- **caliper** is the distance which is acceptable for any match. Observations which are outside of the caliper are dropped. For example, caliper=.25 means that all matches not equal to or within .25 standard deviations of each covariate in X are dropped;
+- **replace** denotes whether matching should be done with replacement, by default is TURE. if `replace=F`, the order of matches generally matters. Matches will be found in the same order as the data are sorted. Matching without replacement will generally increase bias.
+
+```{r}
+## one-to-one matching with replacement, match on educ and marital status, ATT
+match1 <- Match(Y=Y, Tr=Tr, X=lalonde[,c('educ', 'married')], replace = T)
+summary(match1)
+
+## one-to-one matching without replacement, match on propensity score, ATT
+match2 <- Match(Y = Y, Tr = Tr, X = glm.ps$fitted, replace = F)
+summary(match2)
+
+# one-to-one matching with replacement, match on propensity score, ATE
+match3 <- Match(Y = Y, Tr = Tr, X = glm.ps$fitted, estimand = "ATE", replace = T)
+summary(match3)
+
+# one-to-multiple matching with replacement, match on propensity score, ATT
+match4 <- Match(Y=Y, Tr = Tr, X = glm.ps$fitted, M=2, caliper = 0.25,
+                replace = T)
+summary(match4)
+
+# the following two are equivalent
+m1 = Match(Y = Y, Tr = Tr, X = glm.ps$fitted)
+m1 = Match(Y = Y, Tr = Tr, X = glm.ps$fitted, estimand = "ATT",
+           M = 1, replace = TRUE)
+```
+
+Use `MatchBalance()` from `Matching` to examine how well the matching procedure did in producing balance. If the balance results printed by `MatchBalance` are not good enough, one would go back and change either the propensity score model or some parameter of how the matching is done.
+
+```{r}
+## Tests for Univariate Balance
+MatchBalance(Tr ~ nodegr, match.out = match1, nboots = 1000, data = lalonde)
+MatchBalance(Tr ~ re74, match.out = match2, nboots = 1000, data = lalonde)
+
+## plot: before matching
+qqplot(lalonde$re74[lalonde$treat==0], lalonde$re74[lalonde$treat==1])
+abline(coef = c(0, 1), col = 2)
+
+## plot: after matching
+qqplot(lalonde$re74[match2$index.control], lalonde$re74[match2$index.treated])
+abline(coef = c(0, 1), col = 2)
+```
+
+Tests for Multivariate Balance
+
+```{r}
+## propensity score model proposed by Dehejia and Wahba (1999)
+dw.pscore <- glm(Tr ~ age + I(age^2) + educ + I(educ^2) + black + hisp +
+                   married + nodegr + re74 + I(re74^2) + re75 + 
+                   I(re75^2) + u74 + u75,
+                 family = binomial, data = lalonde)
+# estimate the ATT
+dw.rr <- Match(Y = Y, Tr = Tr, X = dw.pscore$fitted)
+summary(dw.rr)
+# ## Tests for Multivariate Balance
+MatchBalance(Tr ~ age + I(age^2) + educ + I(educ^2) + black + hisp +
+               married + nodegr + re74 + I(re74^2) + re75 + I(re75^2) + u74 + u75 +
+               I(re74 * re75) + I(age * nodegr) + I(educ * re74) + I(educ * re75),
+             data = lalonde, match.out = dw.rr, nboots = 1000)
+```
+
+Note: Sometimes matching even gives you a worse result, you may find the variable *re74* is the case  
+
+Recover the Matched Dataset
+
+```{r}
+## recover datasets
+treated.data <- lalonde[dw.rr$index.treated, ]
+control.data <- lalonde[dw.rr$index.control, ]
+matched.data <- rbind(treated.data, control.data)
+
+## extract variables
+Y2 <- dw.rr$mdata$Y # the outcome vector of matched dataset
+Tr2 <- dw.rr$mdata$Tr # the treatment indicator of matched dataset
+X2 <- dw.rr$mdata$X # The X matrix contains matched pairs.
+```
+
+
+# Fixed Effect
+
+Let's use `plm`, `lfe` and `fixest` to fit fixed effect model. 
+
+Empirical example: *Aghion, Van Reenen, and Zingales (2013 AER)*
+
+@Aghion2013Innovation studied the relationship between institutional ownership and innovation. We replicate column 1 of Table 1 of this paper (see page 283).
+
+```{r}
+## library packages
+library(plm)
+library(lfe)
+library(fixest)
+library(sandwich)
+library(lmtest)
+
+## load the data: from the "sandwich" package (Aghion, Van Reenen, and Zingales, 2013 AER)
+data("InstInnovation")
+
+## Least Square Dummy Variable (LSDV)
+### with firm dummies and time dummies (Fixed effects as a dummy variable model)
+fe_lsdv <- lm(log(cites+1)~institutions+log(I(capital/employment)+1)+log(sales+1)
+              +factor(industry)+factor(year),
+              data = InstInnovation)
+se_lsdv <- coeftest(fe_lsdv, vcov. = vcovCL(fe_lsdv, cluster = ~industry+year))[,2]
+```
+
+When fitting a fixed effect model on panel data, `plm()` is preferred than LSDV.
+- **effect**: 'individual', 'time', 'twoways', or 'nested';
+- **model**: 'pooling'(pooled OLS), 'within'(fixed effect), 'between'(between), 'random'(random effects), 'fd'(first differences).
+
+```{r}
+## Fixed effect using `plm`
+### transform to panel data
+InstInnovation_p <- pdata.frame(InstInnovation, index = c("company", "year"), drop.index = TRUE)
+### note: index identifies id and time
+
+## Within estimator: one-way (time) FE + industry FE(Fixed effects as deviation from means)
+fe_within <- plm(log(cites+1)~institutions+log(I(capital/employment)+1)+
+                   log(sales+1)+factor(industry),
+                 effect = "time",
+                 model = "within",
+                 data = InstInnovation_p)
+se_within <- coeftest(fe_within, 
+                      vcov. = vcovHC(fe_within, cluster = "group"))[,2]
+
+## First-difference: with industry dummies (Fixed effects as difference in time)
+fe_fd <- plm(log(cites+1)~institutions+log(I(capital/employment)+1)+
+               log(sales+1)+factor(industry),
+             effect = "individual",
+             model = "fd",
+             data = InstInnovation_p)
+se_fd <- coeftest(fe_fd, 
+                  vcov. = vcovHC(fe_fd, cluster ="group"))[,2]
+
+# show the results
+library(texreg)
+screenreg(list(fe_lsdv, fe_within, fe_fd),
+          se = list(se_lsdv, se_within, se_fd),
+          custom.model.names = c("ln(Cites) LSDV", "ln(Cites) Within", "ln(Cites) FD"),
+          custom.coef.names = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          omit.coef = c("(Intercept)|(industry)|(company)|(year)"),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4)
+```
+
+Note: First difference gives us very different results from within fixed effect. It's because FD and FE have different assumptions and FD usually generate missing values. Generally, we prefer results from FE and use FD as a robustness check.
+
+
+Now, let's fit a twoway fixed effect model, fixing at company level and year level.
+
+```{r}
+## LSDV (with company dummies and year dummies)
+fe_lsdv2 <- lm(log(cites+1)~institutions+log(I(capital/employment)+1)+log(sales+1)
+              +factor(company)+factor(year),
+              data = InstInnovation)
+se_lsdv2 <- coeftest(fe_lsdv2, 
+                     vcov. = vcovCL(fe_lsdv2, cluster = ~company+year))[,2]
+
+## twoway fixed effect
+fe_within2 <- plm(log(cites+1)~institutions+log(I(capital/employment)+1)+log(sales+1),
+                   effect = "twoways",
+                   model = "within",
+                   data = InstInnovation_p)
+se_within2 <- coeftest(fe_within2, 
+                     vcov. = vcovHC(fe_within2, cluster = 'group'))[,2]
+
+```
+
+Alternative packages: `lfe` and `fixest`, more efficient with large panels, and clustered and robust standard errors are handled more elegantly compared to `plm`
+
+```{r}
+## the felm() function from the lfe package
+fe_1 <- felm(log(cites+1)~institutions+log(I(capital/employment)+1)+log(sales+1) # Y and Xs
+             | company + year # fixed effects
+             | 0 # IVs
+             | company+year, # clusters
+             data = InstInnovation)
+
+## compare the results
+screenreg(list(fe_lsdv2, fe_within2, fe_1),
+          se = list(se_lsdv2, se_within2, 
+                    summary(fe_1)$coefficients[,2]),
+          custom.model.names = c("LSDV Firm+Year", 
+                                 "Within Firm+Year(plm)",
+                                 "Within Firm+Year(felm)"),
+          custom.coef.names = c("Share of institutions", "ln(K/L)", "ln(Sales)"),
+          omit.coef = c("(Intercept)|(industry)|(company)|(year)"),
+          stars = c(0.01, 0.05, 0.1),
+          digits = 4)
+
+# the feols() function from the fixest package
+fe_2 <- feols(I(log(cites+1))~institutions+
+                log(I(capital/employment)+1)+log(sales+1) # Y and Xs
+              |company+year, # fixed effects
+              data = InstInnovation)
+summary(fe_2, cluster=~company+year)
+```
+
+# Diff in Diffs
+
+DID estimation can be done by the **lm()** function or functions from other packages.
+
+Empirical example: **Card and Krueger (1994 AER)**, this paper examines the effect of minimum wage increase on the employment:
+
+- **fte**: full time-equivalent employees
+- **nj**: =1 if New Jersey (first d: location difference)
+- **d**: =1 if after NJ mini wage increases (second d: time difference)
+
+```{r}
+## library packages
+library(foreign)
+## load data: Card and Krueger (1994 AER)
+minwage <- read.dta("njmin3.dta")
+
+# regression
+did <- lm(fte~nj*d, data = minwage)
+summary(did)
+```
+
+
+# Causal Forest (Advanced)
+
+Basically, causal forest predicts the counterfactual, then we will get an estimation of individual level treatment effect $\tau_i=Y_i^1-Y_i^0$ (see lecture 7 slides).  
+
+We use `grf` package to fit it. data used here is from *Dehejia and Wahba (1999 JASA)*.
+
+```{r}
+## library packages and load data
+library(grf)
+
+## split data into training and test sets
+set.seed(333)
+train <- sample(1:nrow(lalonde), round(nrow(lalonde) * .5))
+trainset <- lalonde[train, ]
+testset <- lalonde[-train, ]
+```
+
+Now let's fit the causal forest using `causal_forest()` function from `grf` package. The `causal_forest()` has 3 primary inputs: 
+
+- **X** is a matrix of the covariates which we are using to predict heterogeneity in treatment effects;
+- **Y** is a vector of the outcome of interest;
+- **W** is the treatment assignment. 
+
+The crucial thing here is that all of these must be numeric, which means that we need to dummy code the factor variables.
+
+```{r}
+X = as.matrix(trainset[, -c(9, 12)])
+Y = trainset$re78
+W = as.numeric(trainset$treat)
+
+## fit a causal forest
+cf <- causal_forest(X = X, Y = Y, W = W, num.trees = 5000, seed = 333)
+```
+
+Estimate CATE and CATT using `average_treatment_effect()` function
+
+```{r}
+# Estimate the conditional average treatment effect on the full sample (CATE).
+average_treatment_effect(cf, target.sample = "all")
+
+# Estimate the conditional average treatment effect on the treated sample (CATT).
+average_treatment_effect(cf, target.sample = "treated")
+```
+
+Predict on test set
+
+```{r}
+preds <- predict(object = cf, 
+                 newdata = as.matrix(testset[, -c(9, 12)]),
+                 estimate.variance = TRUE) # tell grf to include variance estimates
+
+## assign the predictions (the estimated treatment effects) to the test data frame so that we can use these in subsequent analyses:
+testset$preds <- preds$predictions
+testset$se <- sqrt(preds$variance.estimates)
+```
+
+We would also like to know the nature of the heterogeneity: What variables are useful for targeting based on treatment effects? 
+
+The `grf` package also has a `variable_importance()` function to realize it.
+
+```{r}
+## variable importance
+library(dplyr)
+cf %>% 
+  variable_importance() %>% 
+  as.data.frame() %>% 
+  mutate(variable = colnames(cf$X.orig)) %>% 
+  arrange(desc(V1))
+```
+
+
+plot individual level treatment effect on covariates
+
+```{r}
+library(ggplot2)
+library(sjPlot)
+## traditional linear interaction
+lm_interaction <- lm(re78 ~ age*treat+.-re78, data = lalonde)
+plot_model(lm_interaction, type = "int", ci.lvl = NA)
+
+## individual treatment effect
+trainset$age2 <- cut(trainset$age, breaks = c(0, 20, 25, 30, 35, 40, 45, Inf),
+                     right = F, labels = c(1:7))
+
+ate <- data.frame()
+for (i in 1:7) {
+  df <- as.data.frame(t(average_treatment_effect(cf, target.sample = "all",
+                                         subset=trainset$age2==i)))
+  ate <- rbind(ate, df)
+}
+ate$age <- c(20, 25, 30, 35, 40, 45, 50)
+
+ate %>% ggplot() +
+  geom_line(aes(x = age, y = estimate)) +
+  geom_line(aes(x = age, y = estimate+1.96*std.err), linetype='dashed')+
+  geom_line(aes(x = age, y = estimate-1.96*std.err), linetype='dashed')+
+  labs(x='age', y='CATE')+
+  theme_light()
+```
+
